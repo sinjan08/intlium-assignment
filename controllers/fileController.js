@@ -2,18 +2,52 @@ const Folder = require('../models/FolderModel');
 const Files = require('../models/FileModel');
 const { respond } = require('../utils/helper');
 const dayjs = require('dayjs');
+const path = require('path');
+const { prepareFileStoragePath } = require('../utils/fileUploader');
+const fs = require('fs');
+
+
 
 const currentDateTime = dayjs().format('YYYY-MM-DD HH:mm:ss');
 
 exports.createFile = async (req, res) => {
     try {
-        const { name, parent_id } = req.body;
+        const { folder_id } = req.body;
+        if (req.file) {
+            const { relativePath } = await prepareFileStoragePath(folder_id);
+            const file = req.file;
+            const filePath = path.posix.join(relativePath, file.filename);
 
-        const folder = await Folder.create({ name, parent_id, user_id: req.user.id, created_at: currentDateTime });
-        const { id, name: folderName, parent_id: parentFolder, user_id } = folder.toJSON();
-        return respond(res, true, 201, 'Folder created successfully', { id, name: folderName, parent_id: parentFolder, user_id });
+            if (!filePath) {
+                return respond(res, false, 422, 'Failed to upload file.');
+            }
+
+            newFileData = {
+                name: file.filename,
+                path: filePath,
+                type: file.mimetype,
+                size: file.size,
+                user_id: req.user.id,
+                created_at: currentDateTime
+            };
+
+            if (folder_id) {
+                newFileData.folder_id = folder_id;
+            }
+
+            const newFile = Files.create(newFileData);
+
+            if (!newFile) {
+                return respond(res, false, 422, 'Failed to save file info.');
+            }
+
+            newFileData.id = newFile.id;
+            return respond(res, true, 201, "File uploaded successfully", { newFileData });
+        } else {
+            return respond(res, false, 422, 'File not found');
+        }
     } catch (err) {
-        console.log(err);
+        console.error(err);
         return respond(res, false, 500, 'An error occurred: ' + err.message);
     }
 };
@@ -67,19 +101,28 @@ exports.getFileAndFolders = async (req, res) => {
 };
 
 
-exports.updateFolder = async (req, res) => {
+exports.updateFile = async (req, res) => {
     try {
         const { id } = req.params;
         const { name } = req.body;
-        const folder = await Folder.findByPk(id);
-        if (!folder) {
-            return respond(res, false, 404, 'Folder not found');
+        const file = await Files.findByPk(id);
+        if (!file) {
+            return respond(res, false, 404, 'File not found');
         }
-        folder.name = name;
-        folder.updated_at = currentDateTime;
-        await folder.save();
-        const { parent_id, user_id } = folder.toJSON();
-        return respond(res, true, 200, 'Folder updated successfully', { id, name, parent_id, user_id });
+
+        filePath = file.path;
+        actualFolderPath = path.dirname(filePath);
+        newfilePath = actualFolderPath + "/" + name;
+
+        fs.renameSync(filePath, newfilePath, function (err) {
+            if (err) return respond(res, false, 500, 'File can not be renamed: ' + err.message);
+        });
+
+        file.name = name;
+        file.updated_at = currentDateTime;
+        await file.save();
+        const { name: fileName, path, type, size, folder_id, user_id } = folder.toJSON();
+        return respond(res, true, 200, 'File updated successfully', { id, name: fileName, path, type, size, folder_id, user_id });
     } catch (err) {
         console.log(err);
         return respond(res, false, 500, 'An error occurred: ' + err.message);
@@ -87,17 +130,26 @@ exports.updateFolder = async (req, res) => {
 };
 
 
-exports.trashFolder = async (req, res) => {
+exports.trashFile = async (req, res) => {
     try {
         const { id } = req.params;
-        const folder = await Folder.findByPk(id);
-        if (!folder) {
+        const file = await Files.findByPk(id);
+        if (!file) {
             return respond(res, 422, 'Folder not found');
         }
-        folder.is_deleted = true;
-        folder.is_active = false;
-        folder.deleted_at = dayjs().format('YYYY-MM-DD HH:mm:ss');
-        await folder.save();
+
+        filePath = file.path;
+        actualFolderPath = path.dirname(filePath);
+        newfilePath = "uploads/trash/" + file.name;
+
+        fs.renameSync(filePath, newfilePath, function (err) {
+            if (err) return respond(res, false, 500, 'File can not be trashed: ' + err.message);
+        });
+
+        file.is_deleted = true;
+        file.is_active = false;
+        file.deleted_at = dayjs().format('YYYY-MM-DD HH:mm:ss');
+        await file.save();
         return respond(res, true, 200, 'Folder trashed successfully');
     } catch (err) {
         return respond(res, false, 500, "An error occurred: " + err.message);
@@ -105,14 +157,19 @@ exports.trashFolder = async (req, res) => {
 }
 
 
-exports.deleteFolder = async (req, res) => {
+exports.deleteFile = async (req, res) => {
     try {
         const { id } = req.params;
-        const folder = await Folder.findByPk(id);
-        if (!folder) {
+        const file = await Files.findByPk(id);
+        if (!file) {
             return respond(res, false, 404, 'Folder not found');
         }
-        await folder.destroy();
+
+        fs.unlinkSync(file.path, (err) => {
+            if (err) return respond(res, false, 500, 'File can not be deleted: ' + err.message);
+        });
+
+        await file.destroy();
         return respond(res, true, 200, 'Folder deleted successfully');
     } catch (err) {
         console.log(err);

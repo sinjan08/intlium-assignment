@@ -9,6 +9,7 @@ router.put('/update/:id', validateCreateFolder, validate, folderController.updat
 router.put('/delete/:id', validate, folderController.trashFolder);
 router.delete('/delete/:id', validate, folderController.deleteFolder);
 router.get('/parent', folderController.getParentFolders);
+router.get('/fetch/:id', folderController.getFileAndFolders);
 router.get('/:id', folderController.getFileAndFolders);
 
 module.exports = router;
